@@ -9,13 +9,18 @@ SQL_BLOCKED = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCAT
 
 # Shell: dangerous commands
 SHELL_BLOCKED_PATTERNS = [
-    r"\brm\s+-rf\s+/\b",
+    r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/",      # rm -rf /, rm -Rf /, rm -rfv /
+    r"\brm\s+-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\s+/",      # rm -fr /, rm -fRv /
+    r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+\*",     # rm -rf *
+    r"\bsudo\s+rm\s+",
     r"\bmkfs\b",
     r"\bdd\s+if=",
-    r":\(\)\s*\{.*:\|:.*&\s*\}",  # fork bomb
+    r":\(\)\s*\{.*:\|:.*&\s*\}",                         # fork bomb
     r"\bshutdown\b",
     r"\breboot\b",
+    r"\binit\s+0\b",
     r">\s*/dev/sd",
+    r"\bchmod\s+-R\s+777\s+/",
 ]
 
 # Secret patterns (redact in outputs)

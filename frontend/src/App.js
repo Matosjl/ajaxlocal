@@ -1,4 +1,5 @@
 import "@/App.css";
+import "./responsive.css";
 import "highlight.js/styles/github-dark.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AjaxChat from "./pages/AjaxChat";

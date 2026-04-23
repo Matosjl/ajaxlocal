@@ -20,6 +20,9 @@ import {
   Database,
   Zap,
   Loader2,
+  Menu,
+  X,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
@@ -63,7 +66,13 @@ export default function AjaxChat() {
   const [stats, setStats] = useState(null);
   const [collections, setCollections] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const scrollRef = useRef(null);
+
+  // Close sidebar when selecting session on mobile
+  const closeSidebarOnMobile = () => {
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
 
   // ----- bootstrap -----
   const fetchSessions = useCallback(async () => {
@@ -118,6 +127,7 @@ export default function AjaxChat() {
     const r = await axios.get(`${API}/sessions/${sid}/messages`);
     setMessages(r.data);
     refreshLogs(sid);
+    closeSidebarOnMobile();
   };
 
   const deleteSession = async (sid, e) => {
@@ -265,25 +275,39 @@ export default function AjaxChat() {
   const totalDocs = collections.reduce((a, c) => a + (c.count || 0), 0);
 
   return (
-    <div className="flex h-screen overflow-hidden grain bg-[#0a0a0c]">
+    <div className="flex h-[100dvh] overflow-hidden grain bg-[#0a0a0c]">
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       {/* Sidebar */}
       <aside
         data-testid="sidebar"
-        className="w-72 border-r border-zinc-800/80 bg-[#0d0d10] flex flex-col"
+        className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 fixed md:relative top-0 left-0 h-[100dvh] md:h-auto z-40 md:z-auto w-[82vw] max-w-[320px] md:w-72 md:max-w-none border-r border-zinc-800/80 bg-[#0d0d10] flex flex-col transition-transform duration-200`}
       >
         <div className="p-5 border-b border-zinc-800/80">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center">
               <Bot size={20} className="text-zinc-950" />
             </div>
-            <div>
+            <div className="flex-1">
               <h1 className="text-base font-bold tracking-tight text-zinc-100">AJAX</h1>
               <p className="text-[11px] text-zinc-500 -mt-0.5">super-agente local</p>
             </div>
+            <button
+              data-testid="sidebar-close-btn"
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden text-zinc-500 hover:text-zinc-200"
+            >
+              <X size={20} />
+            </button>
           </div>
           <Button
             data-testid="new-session-btn"
-            onClick={createSession}
+            onClick={() => { createSession(); closeSidebarOnMobile(); }}
             className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-medium"
           >
             <Plus size={16} className="mr-1" />
@@ -387,26 +411,49 @@ export default function AjaxChat() {
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* Developer credits */}
+          <a
+            data-testid="dev-credits"
+            href="https://wa.me/5551981521264?text=Ol%C3%A1%20Jos%C3%A9%20Lorenzo%2C%20vi%20o%20Ajax%20Super-Agent%20e%20gostaria%20de%20conversar"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 block text-center text-[10px] text-zinc-600 hover:text-orange-400 transition border-t border-zinc-900/80 pt-2"
+          >
+            <span className="block">desenvolvido por</span>
+            <span className="block text-zinc-400 font-semibold flex items-center justify-center gap-1 mt-0.5">
+              <MessageCircle size={10} /> José Lorenzo
+            </span>
+            <span className="block mono text-zinc-600 text-[10px]">(51) 98152-1264</span>
+          </a>
         </div>
       </aside>
 
       {/* Main */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        <Tabs defaultValue="chat" className="flex flex-col h-full">
-          <div className="border-b border-zinc-800/80 px-6 py-3 flex items-center justify-between bg-[#0a0a0c]">
+        <Tabs defaultValue="chat" className="flex flex-col h-full ajax-tabs">
+          <div className="border-b border-zinc-800/80 px-4 md:px-6 py-3 flex items-center justify-between bg-[#0a0a0c] gap-2">
+            <button
+              data-testid="sidebar-toggle"
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden text-zinc-400 hover:text-zinc-100 p-1"
+            >
+              <Menu size={22} />
+            </button>
             <TabsList className="bg-zinc-900 border border-zinc-800">
               <TabsTrigger data-testid="tab-chat" value="chat" className="data-[state=active]:bg-orange-500 data-[state=active]:text-zinc-950">
                 Chat
               </TabsTrigger>
               <TabsTrigger data-testid="tab-logs" value="logs" className="data-[state=active]:bg-orange-500 data-[state=active]:text-zinc-950">
-                Observabilidade
+                <span className="hidden sm:inline">Observabilidade</span>
+                <span className="sm:hidden">Logs</span>
               </TabsTrigger>
               <TabsTrigger data-testid="tab-rag" value="rag" className="data-[state=active]:bg-orange-500 data-[state=active]:text-zinc-950">
                 RAG
               </TabsTrigger>
             </TabsList>
             {stats && (
-              <div className="flex items-center gap-3 text-xs text-zinc-500">
+              <div className="hidden md:flex items-center gap-3 text-xs text-zinc-500">
                 <span className="flex items-center gap-1"><Zap size={12} /> {stats.total_events} eventos</span>
                 <span>· {stats.prompt_tokens + stats.completion_tokens} tokens</span>
                 <span>· {(stats.total_duration_ms / 1000).toFixed(1)}s</span>
@@ -416,7 +463,7 @@ export default function AjaxChat() {
 
           {/* CHAT */}
           <TabsContent value="chat" className="flex-1 flex flex-col overflow-hidden m-0">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll px-6 py-8 space-y-6">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll px-3 md:px-6 py-6 md:py-8 space-y-6">
               {messages.length === 0 && !streaming && (
                 <Welcome />
               )}
@@ -426,7 +473,7 @@ export default function AjaxChat() {
             </div>
 
             {/* Composer */}
-            <div className="border-t border-zinc-800/80 p-4 bg-[#0a0a0c]">
+            <div className="border-t border-zinc-800/80 p-3 md:p-4 bg-[#0a0a0c] ajax-composer safe-bottom">
               <div className="max-w-4xl mx-auto">
                 <div className="relative">
                   <Textarea
@@ -435,7 +482,7 @@ export default function AjaxChat() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={onKeyDown}
                     disabled={streaming}
-                    placeholder="Pergunte ao Ajax... (Enter pra enviar, Shift+Enter pra quebrar linha)"
+                    placeholder="Pergunte ao Ajax..."
                     className="min-h-[60px] max-h-40 resize-none bg-zinc-900/50 border-zinc-800 pr-14 focus-visible:ring-orange-500/50 text-sm"
                   />
                   <Button
@@ -448,7 +495,7 @@ export default function AjaxChat() {
                     {streaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                   </Button>
                 </div>
-                <p className="text-[10px] text-zinc-600 mt-2 text-center">
+                <p className="text-[10px] text-zinc-600 mt-2 text-center hidden md:block">
                   Ajax pensa antes de agir · ferramentas sandboxadas · respostas com markdown
                 </p>
               </div>
@@ -555,7 +602,7 @@ function Welcome() {
           Seu super-agente de programação e automação local. Manda ver.
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 ajax-welcome-grid">
         {cards.map((c, i) => (
           <div key={i} className="glass-card rounded-lg p-4">
             <c.icon size={18} className="text-orange-500 mb-2" />
@@ -572,7 +619,7 @@ function MessageBubble({ msg }) {
   if (msg.role === "user") {
     return (
       <div data-testid={`msg-user-${msg.id}`} className="flex gap-3 max-w-4xl mx-auto justify-end">
-        <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]">
+        <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] ajax-bubble-user">
           <p className="text-sm text-zinc-100 whitespace-pre-wrap">{msg.content}</p>
         </div>
         <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center flex-shrink-0">
@@ -586,7 +633,7 @@ function MessageBubble({ msg }) {
   }
 
   return (
-    <div data-testid={`msg-asst-${msg.id}`} className="flex gap-3 max-w-4xl mx-auto">
+    <div data-testid={`msg-asst-${msg.id}`} className="flex gap-3 max-w-4xl mx-auto ajax-bubble-asst">
       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center flex-shrink-0">
         <Bot size={15} className="text-zinc-950" />
       </div>
