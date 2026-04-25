@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guia n8n + Ajax para Restaurante</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+            background: #f8f9fa; 
+            color: #333; 
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 50px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h1 { color: #e74c3c; font-size: 2.2rem; margin-bottom: 10px; border-bottom: 3px solid #e74c3c; padding-bottom: 15px; }
+        h2 { color: #2c3e50; font-size: 1.5rem; margin-top: 35px; margin-bottom: 15px; }
+        h3 { color: #34495e; font-size: 1.2rem; margin-top: 25px; margin-bottom: 10px; }
+        p { margin-bottom: 15px; font-size: 1.05rem; }
+        .subtitle { color: #7f8c8d; font-size: 1.1rem; margin-bottom: 30px; }
+        .highlight { background: #fff3cd; padding: 15px 20px; border-left: 4px solid #ffc107; border-radius: 6px; margin: 20px 0; }
+        .tip { background: #d1ecf1; padding: 15px 20px; border-left: 4px solid #17a2b8; border-radius: 6px; margin: 20px 0; }
+        .success { background: #d4edda; padding: 15px 20px; border-left: 4px solid #28a745; border-radius: 6px; margin: 20px 0; }
+        code { background: #f4f4f4; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 8px; overflow-x: auto; margin: 15px 0; }
+        pre code { background: none; padding: 0; color: inherit; }
+        ul, ol { margin-left: 25px; margin-bottom: 15px; }
+        li { margin-bottom: 8px; }
+        .flow-card { background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; padding: 25px; margin: 20px 0; }
+        .flow-card h3 { color: #e74c3c; margin-top: 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #e74c3c; color: white; }
+        tr:hover { background: #f5f5f5; }
+        .btn { 
+            display: inline-block; 
+            background: #e74c3c; 
+            color: white; 
+            padding: 12px 30px; 
+            border-radius: 6px; 
+            text-decoration: none; 
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        .btn:hover { background: #c0392b; }
+        .print-only { display: none; }
+        @media print {
+            body { padding: 0; background: white; }
+            .container { box-shadow: none; max-width: 100%; padding: 30px; }
+            .no-print { display: none; }
+            .print-only { display: block; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🍽️ Guia n8n + Ajax para Restaurantes</h1>
+        <p class="subtitle">Automatize seu atendimento, reservas e pedidos com inteligência artificial</p>
+
+        <div class="highlight">
+            <strong>Por que isso é bom para o seu restaurante?</strong><br>
+            O n8n é a interface que conecta o Ajax (seu motor de IA) a tudo que seus clientes usam: WhatsApp, Instagram, Facebook, e-mail e site. 
+            Com essa integração, você atende 24h por dia, captura leads automaticamente e nunca perde uma reserva — sem contratar mais funcionários.
+        </div>
+
+        <h2>📋 O que você vai aprender</h2>
+        <ol>
+            <li>Como instalar o n8n no seu servidor</li>
+            <li>Como conectar o Ajax como "cérebro" dos fluxos</li>
+            <li>3 fluxos prontos para usar: Reservas, Atendimento e Pedidos</li>
+            <li>Como testar tudo antes de ir para produção</li>
+        </ol>
+
+        <h2>🚀 1. Instalação do n8n</h2>
+        <p>O n8n é uma ferramenta de automação open-source. Você pode rodar via Docker:</p>
+        <pre><code>docker run -it --rm \
+  --name n8n \
+  -p 5678:5678 \
+  -v ~/.n8n:/home/node/.n8n \
+  n8nio/n8n</code></pre>
+        <p>Acesse <code>http://localhost:5678</code> no navegador.</p>
+
+        <div class="tip">
+            <strong>Dica:</strong> Para produção, use o Docker Compose com PostgreSQL para persistir dados.
+        </div>
+
+        <h2>🔗 2. Conectando o Ajax ao n8n</h2>
+        <p>O Ajax tem um endpoint HTTP que o n8n pode chamar via node <strong>HTTP Request</strong>:</p>
+        <pre><code>POST http://localhost:8000/api/agent/chat
+Content-Type: application/json
+
+{
+  "session_id": "restaurante-{{$node[\"Webhook\"].json[\"body\"][\"from\"]}}",
+  "message": "{{$node[\"Webhook\"].json[\"body\"][\"message\"]}}"
+}</code></pre>
+
+        <h2>⚡ 3. Fluxos Prontos para o Restaurante</h2>
+
+        <div class="flow-card">
+            <h3>🪑 Fluxo 1: Reserva Automática de Mesas</h3>
+            <p><strong>Gatilho:</strong> Cliente manda "Quero reservar uma mesa para 4 pessoas sábado às 20h"</p>
+            <p><strong>O que acontece:</strong></p>
+            <ol>
+                <li>Webhook captura a mensagem (WhatsApp/Instagram)</li>
+                <li>Consulta API do Ajax para entender a intenção</li>
+                <li>Verifica disponibilidade no Google Sheets/Calendly</li>
+                <li>Confirma ou sugere outro horário</li>
+                <li>Envia confirmação com QR Code da mesa</li>
+            </ol>
+            <p><strong>Ferramentas n8n usadas:</strong> Webhook → HTTP Request (Ajax) → Google Sheets → If → Respond to Webhook</p>
+        </div>
+
+        <div class="flow-card">
+            <h3>💬 Fluxo 2: Atendimento Automático 24h</h3>
+            <p><strong>Gatilho:</strong> Qualquer mensagem fora do horário comercial</p>
+            <p><strong>O que acontece:</strong></p>
+            <ol>
+                <li>Webhook recebe mensagem</li>
+                <li>HTTP Request envia para o Ajax com contexto do cardápio</li>
+                <li>Ajax responde sobre: ingredientes, alergênicos, preços, promoções</li>
+                <li>Se detectar intenção de pedido, redireciona para fluxo de Pedidos</li>
+                <li>Se for dúvida simples, responde imediatamente</li>
+            </ol>
+            <p><strong>Ferramentas n8n usadas:</strong> Webhook → HTTP Request (Ajax) → Switch → Respond to Webhook</p>
+        </div>
+
+        <div class="flow-card">
+            <h3>🥡 Fluxo 3: Pedido Online via WhatsApp</h3>
+            <p><strong>Gatilho:</strong> Cliente manda "Quer 1 pizza calabresa e 1 refrigerante"</p>
+            <p><strong>O que acontece:</strong></p>
+            <ol>
+                <li>Webhook recebe o pedido</li>
+                <li>Ajax extrai itens, quantidades e endereço</li>
+                <li>Calcula total com taxa de entrega</li>
+                <li>Gera link de pagamento (Pix/Mercado Pago)</li>
+                <li>Envia confirmação para cozinha (impressora ou tablet)</li>
+            </ol>
+            <p><strong>Ferramentas n8n usadas:</strong> Webhook → HTTP Request (Ajax) → Set → Mercado Pago API → Webhook Response</p>
+        </div>
+
+        <h2>🧪 4. Teste na Web</h2>
+        <p>Antes de ativar no WhatsApp real, teste os fluxos usando o simulador web:</p>
+        <div class="success">
+            <strong>Arquivos de teste incluídos neste pacote:</strong>
+            <ul>
+                <li><code>teste-web.html</code> — Interface web para testar respostas do Ajax</li>
+                <li><code>fluxo-reservas.json</code> — Fluxo n8n importável</li>
+                <li><code>fluxo-atendimento.json</code> — Fluxo n8n importável</li>
+            </ul>
+        </div>
+
+        <h2>📊 Comparação: Antes vs Depois</h2>
+        <table>
+            <tr><th>Processo</th><th>Antes</th><th>Com n8n + Ajax</th></tr>
+            <tr><td>Responder perguntas</td><td>Atendente manual</td><td>IA 24h instantânea</td></tr>
+            <tr><td>Reservas</td><td>Ligação telefônica</td><td>WhatsApp automático</td></tr>
+            <tr><td>Pedidos</td><td>App de terceiro (taxa 15-30%)</td><td>Direto, sem taxa</td></tr>
+            <tr><td>Captura de leads</td><td>Perde 60% dos interessados</td><td>Captura 100% automaticamente</td></tr>
+            <tr><td>Custo mensal</td><td>R$ 3.000+ (funcionários)</td><td>R$ 50-200 (servidor)</td></tr>
+        </table>
+
+        <h2>🎯 Próximos Passos</h2>
+        <ol>
+            <li>Instale o n8n com Docker (comando acima)</li>
+            <li>Importe os fluxos JSON incluídos neste pacote</li>
+            <li>Configure o webhook do WhatsApp/Instagram</li>
+            <li>Abra o <code>teste-web.html</code> e faça perguntas de teste</li>
+            <li>Ajuste as respostas do Ajax no arquivo <code>agent_core/SYSTEM_PROMPT</code></li>
+            <li>Ative o fluxo e comece a atender automaticamente!</li>
+        </ol>
+
+        <div class="highlight">
+            <strong>Lembre-se:</strong> O Ajax é o motor inteligente. O n8n é a carcaça que conecta esse motor ao WhatsApp, Instagram, e-mail e tudo mais. Juntos, eles transformam seu restaurante em uma máquina de atendimento 24h.
+        </div>
+
+        <div class="no-print" style="text-align: center; margin-top: 40px;">
+            <a href="#" class="btn" onclick="window.print()">🖨️ Imprimir / Salvar como PDF</a>
+        </div>
+
+        <div class="print-only" style="margin-top: 40px; text-align: center; color: #999;">
+            <p>Documento gerado automaticamente pelo Ajax Super-Agent</p>
+            <p>Para atualizações, acesse: github.com/sealo/ajaxlocal</p>
+        </div>
+</body>
+</html>
