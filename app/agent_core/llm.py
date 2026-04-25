@@ -1,11 +1,14 @@
 """LLM Router — unified streaming interface for Ollama (local) and OpenRouter (cloud)."""
 from __future__ import annotations
+import logging
 import os
 import json
 import time
-from typing import AsyncIterator, Optional
+from typing import Iterator, Optional
 import httpx
 from openai import OpenAI
+
+logger = logging.getLogger("ajax.llm")
 
 
 class LLMRouter:
@@ -29,6 +32,7 @@ class LLMRouter:
             else:
                 model = os.environ.get("OPENROUTER_MODEL", "openrouter/auto")
         self.model = model
+        logger.info(f"[LLMRouter] provider={provider} model={model}")
 
         if provider == "openrouter":
             self.client = OpenAI(
@@ -42,6 +46,7 @@ class LLMRouter:
     def chat(self, messages: list, tools: Optional[list] = None, temperature: float = 0.3) -> dict:
         """Returns {content, tool_calls, raw, usage} after a single round."""
         t0 = time.time()
+        logger.debug(f"[LLM.chat] provider={self.provider} model={self.model} tools={bool(tools)} msgs={len(messages)}")
         if self.provider == "openrouter":
             kwargs = {"model": self.model, "messages": messages, "temperature": temperature}
             if tools:
@@ -50,6 +55,7 @@ class LLMRouter:
             try:
                 resp = self.client.chat.completions.create(**kwargs)
             except Exception as e:
+                logger.error(f"[LLM.chat] OpenRouter error: {e}")
                 return {"error": f"Erro na comunicação com OpenRouter: {e}", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
             msg = resp.choices[0].message
             usage = getattr(resp, "usage", None)
@@ -83,19 +89,24 @@ class LLMRouter:
         }
         if tools:
             payload["tools"] = tools
+        logger.debug(f"[LLM._ollama_chat] url={self.ollama_url}/api/chat model={self.model}")
         try:
             with httpx.Client(timeout=300) as c:
                 r = c.post(f"{self.ollama_url}/api/chat", json=payload)
                 r.raise_for_status()
                 data = r.json()
         except httpx.TimeoutException:
-            return {"error": "Timeout ao conectar com Ollama. Verifique se o servidor está rodando.", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
+            logger.error("[LLM._ollama_chat] Timeout ao conectar com Ollama")
+            return {"error": "⏳ Ollama está demorando para responder. Verifique se o servidor está rodando ou tente novamente.", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
         except httpx.ConnectError:
-            return {"error": f"Não foi possível conectar com Ollama em {self.ollama_url}. Verifique se o servidor está ativo.", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
+            logger.error(f"[LLM._ollama_chat] ConnectError: não foi possível conectar em {self.ollama_url}")
+            return {"error": f"🔌 Não foi possível conectar com Ollama em {self.ollama_url}. Verifique se o servidor está ativo (ollama serve).", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
         except KeyboardInterrupt:
-            return {"error": "Requisição interrompida pelo usuário.", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
+            logger.warning("[LLM._ollama_chat] Requisição interrompida pelo usuário")
+            return {"error": "🛑 Requisição interrompida pelo usuário.", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
         except Exception as e:
-            return {"error": f"Erro na comunicação com Ollama: {e}", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
+            logger.error(f"[LLM._ollama_chat] Erro inesperado: {e}")
+            return {"error": f"❌ Erro na comunicação com Ollama: {e}", "content": "", "tool_calls": [], "elapsed": time.time() - t0, "usage": {}, "raw_message": {}}
         msg = data.get("message", {})
         tool_calls = []
         for tc in msg.get("tool_calls", []) or []:
@@ -105,6 +116,7 @@ class LLMRouter:
                 "name": fn.get("name"),
                 "arguments": json.dumps(fn.get("arguments", {})),
             })
+        logger.debug(f"[LLM._ollama_chat] response_len={len(msg.get('content',''))} tool_calls={len(tool_calls)}")
         return {
             "content": msg.get("content", ""),
             "tool_calls": tool_calls,
@@ -117,8 +129,9 @@ class LLMRouter:
         }
 
     # ---------- Streaming text generation (final answer) ----------
-    def stream(self, messages: list, temperature: float = 0.3) -> AsyncIterator[str]:
+    def stream(self, messages: list, temperature: float = 0.3) -> Iterator[str]:
         """Synchronous generator yielding text chunks."""
+        logger.debug(f"[LLM.stream] provider={self.provider} model={self.model}")
         if self.provider == "openrouter":
             stream = self.client.chat.completions.create(
                 model=self.model, messages=messages, stream=True, temperature=temperature,
@@ -134,23 +147,34 @@ class LLMRouter:
                 "stream": True,
                 "options": {"temperature": temperature, "num_ctx": 2048},
             }
-            with httpx.stream("POST", f"{self.ollama_url}/api/chat", json=payload, timeout=300) as r:
-                for line in r.iter_lines():
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    chunk = obj.get("message", {}).get("content", "")
-                    if chunk:
-                        yield chunk
-                    if obj.get("done"):
-                        break
+            try:
+                with httpx.stream("POST", f"{self.ollama_url}/api/chat", json=payload, timeout=300) as r:
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        chunk = obj.get("message", {}).get("content", "")
+                        if chunk:
+                            yield chunk
+                        if obj.get("done"):
+                            break
+            except httpx.TimeoutException:
+                logger.error("[LLM.stream] Timeout no streaming Ollama")
+                yield "\n\n⏳ Ollama demorou muito para responder. Tente novamente ou verifique o servidor."
+            except httpx.ConnectError:
+                logger.error("[LLM.stream] ConnectError no streaming Ollama")
+                yield "\n\n🔌 Não foi possível conectar com Ollama. Verifique se o servidor está ativo."
+            except Exception as e:
+                logger.error(f"[LLM.stream] Erro no streaming: {e}")
+                yield f"\n\n❌ Erro no streaming: {e}"
 
     # ---------- Embeddings (for RAG) ----------
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings. Uses a tiny local fallback if no provider available."""
+        logger.debug(f"[LLM.embed] texts={len(texts)} provider={self.provider}")
         if self.provider == "openrouter":
             # OpenRouter doesn't expose embeddings natively; we use a separate OpenAI-compatible
             # endpoint via OpenRouter's free embedding or a basic hash fallback.
@@ -168,7 +192,8 @@ class LLMRouter:
                         r.raise_for_status()
                         out.append(r.json().get("embedding", []))
                     return out
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[LLM.embed] Fallback para hash_embed devido a erro: {e}")
                 return [self._hash_embed(t) for t in texts]
 
     @staticmethod

@@ -1,6 +1,7 @@
 """Agent — main orchestrator wiring planner + tools + memory + guardrails + observability."""
 from __future__ import annotations
 import json
+import logging
 import time
 from typing import Iterator, Optional
 
@@ -11,6 +12,8 @@ from .observability import Observer, Timer
 from .planner import Planner
 from .rag import RAGStore
 from .tools import ToolRegistry, get_default_tools
+
+logger = logging.getLogger("ajax.agent")
 
 
 SYSTEM_PROMPT = """Você é o **Ajax**, um super-agente de IA profissional.
@@ -78,33 +81,46 @@ class AjaxAgent:
         self.planner = Planner(self.llm, self.observer)
         self.system_prompt = system_prompt
         self.max_tool_iterations = max_tool_iterations
+        logger.info(f"[AjaxAgent] initialized model={self.llm.model} provider={self.llm.provider}")
 
     # -------- Public API: run a single turn (yields events for streaming) --------
     def run_stream(self, session_id: str, user_input: str) -> Iterator[dict]:
         """Yields events: {type, ...}.
         Event types: plan, injection_warning, tool_call, tool_result, token, final, error.
         """
+        logger.info(f"[run_stream] session={session_id[:8]}... input='{user_input[:60]}...'")
+        
         # 1. Injection guardrail
         injected, warning = Guardrails.detect_injection(user_input)
         if injected:
+            logger.warning(f"[run_stream] Injection detectada: {warning[:50]}")
             yield {"type": "injection_warning", "message": warning}
 
         # 2. Persist user message
         self.memory.add_message(session_id, "user", content=user_input)
+        logger.debug(f"[run_stream] Mensagem do usuário persistida")
 
         # 3. Plan (Chain of Thought)
+        logger.info("[run_stream] Gerando plano...")
         plan_result = self.planner.plan(user_input, self.tools.names(), session_id=session_id)
         plan_text = plan_result["plan"]
-        yield {"type": "plan", "content": plan_text, "direct": plan_result["direct"]}
+        is_direct = plan_result["direct"]
+        logger.info(f"[run_stream] Plano gerado: direct={is_direct}")
+        yield {"type": "plan", "content": plan_text, "direct": is_direct}
 
         # 3.5 Fast path for trivial questions (no tools needed)
-        if plan_result["direct"]:
+        if is_direct:
+            logger.info("[run_stream] Fast-path: pergunta trivial, chamando LLM sem ferramentas")
             messages = self.memory.to_llm_messages(session_id, self.system_prompt)
             with Timer() as t:
                 resp = self.llm.chat(messages, tools=None, temperature=0.3)
+            
             if resp.get("error"):
+                logger.error(f"[run_stream] Erro no fast-path: {resp['error']}")
                 yield {"type": "error", "message": resp["error"]}
                 return
+            
+            logger.info(f"[run_stream] Fast-path OK: tokens={resp.get('usage', {})} elapsed={resp.get('elapsed', 0):.2f}s")
             self.observer.log(
                 session_id=session_id,
                 type_="llm_call",
@@ -118,17 +134,22 @@ class AjaxAgent:
             self.memory.add_message(session_id, "assistant", content=clean)
             yield {"type": "token", "content": clean}
             yield {"type": "final", "content": clean}
+            logger.info("[run_stream] Fast-path finalizado com sucesso")
             return
 
         # 4. Tool loop
+        logger.info("[run_stream] Entrando no loop de ferramentas")
         iteration = 0
         while iteration < self.max_tool_iterations:
             iteration += 1
+            logger.info(f"[run_stream] Iteração {iteration}/{self.max_tool_iterations}")
+            
             messages = self.memory.to_llm_messages(session_id, self._compose_system(plan_text))
             with Timer() as t:
                 resp = self.llm.chat(messages, tools=self.tools.schemas(), temperature=0.3)
 
             if resp.get("error"):
+                logger.error(f"[run_stream] Erro na iteração {iteration}: {resp['error']}")
                 yield {"type": "error", "message": resp["error"]}
                 return
 
@@ -144,6 +165,7 @@ class AjaxAgent:
 
             tool_calls = resp.get("tool_calls", [])
             content = resp.get("content", "")
+            logger.info(f"[run_stream] Iteração {iteration}: tool_calls={len(tool_calls)} content_len={len(content)}")
 
             if not tool_calls:
                 # Persist assistant final message + stream content (already complete here)
@@ -152,6 +174,7 @@ class AjaxAgent:
                 # Emit as a single token event (non-streaming chat returns full content)
                 yield {"type": "token", "content": clean}
                 yield {"type": "final", "content": clean}
+                logger.info("[run_stream] Resposta final sem ferramentas")
                 return
 
             # Save assistant message with tool_calls
@@ -160,6 +183,7 @@ class AjaxAgent:
 
             # Execute each tool
             for tc in tool_calls:
+                logger.info(f"[run_stream] Chamando ferramenta: {tc['name']}")
                 yield {"type": "tool_call", "name": tc["name"], "arguments": tc["arguments"], "id": tc["id"]}
                 try:
                     args = json.loads(tc["arguments"]) if tc["arguments"] else {}
@@ -168,6 +192,7 @@ class AjaxAgent:
                 with Timer() as tt:
                     result = self.tools.dispatch(tc["name"], args)
                 redacted = Guardrails.redact_secrets(str(result.get("result", "")))
+                logger.info(f"[run_stream] Resultado {tc['name']}: ok={result.get('ok')} len={len(redacted)}")
                 self.observer.log(
                     session_id=session_id,
                     type_="tool_call",
@@ -187,6 +212,7 @@ class AjaxAgent:
 
             # loop continues — model will see tool results and either call more or finish
 
+        logger.warning(f"[run_stream] Limite de {self.max_tool_iterations} iterações atingido")
         yield {"type": "error", "message": f"Limite de {self.max_tool_iterations} iterações atingido."}
 
     def _compose_system(self, plan_text: str) -> str:
@@ -194,6 +220,10 @@ class AjaxAgent:
 
     # -------- Convenience: non-streaming run --------
     def run(self, session_id: str, user_input: str) -> dict:
+        logger.info(f"[run] session={session_id[:8]}... input='{user_input[:60]}...'")
         events = list(self.run_stream(session_id, user_input))
         final = next((e for e in reversed(events) if e["type"] == "final"), None)
-        return {"events": events, "final": final["content"] if final else ""}
+        result = {"events": events, "final": final["content"] if final else ""}
+        logger.info(f"[run] Finalizado: eventos={len(events)} final_len={len(result['final'])}")
+        return result
+
